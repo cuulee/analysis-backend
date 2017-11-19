@@ -1,6 +1,5 @@
 package com.conveyal.taui.controllers;
 
-import com.conveyal.gtfs.api.ApiMain;
 import com.conveyal.gtfs.api.graphql.WrappedGTFSEntity;
 import com.conveyal.gtfs.api.graphql.fetchers.RouteFetcher;
 import com.conveyal.gtfs.api.graphql.fetchers.StopFetcher;
@@ -8,6 +7,7 @@ import com.conveyal.gtfs.api.models.FeedSource;
 import com.conveyal.gtfs.model.FeedInfo;
 import com.conveyal.taui.AnalysisServerException;
 import com.conveyal.taui.models.Bundle;
+import com.conveyal.taui.persistence.GTFSPersistence;
 import com.conveyal.taui.persistence.Persistence;
 import com.conveyal.taui.util.JsonUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -158,7 +158,7 @@ public class GraphQLController {
                 .map(summary -> {
                     String bundleScopedFeedId = String.format("%s_%s", summary.feedId, bundle._id); // : summary.bundleScopedFeedId;
                     try {
-                        FeedSource fs = ApiMain.getFeedSource(bundleScopedFeedId);
+                        FeedSource fs = GTFSPersistence.getFeedSource(bundleScopedFeedId);
                         FeedInfo ret;
                         if (fs != null && fs.feed.feedInfo.size() > 0)
                             ret = fs.feed.feedInfo.values().iterator().next();

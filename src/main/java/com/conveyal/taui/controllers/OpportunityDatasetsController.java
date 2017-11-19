@@ -1,9 +1,7 @@
 package com.conveyal.taui.controllers;
 
-import com.amazonaws.HttpMethod;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3Client;
-import com.amazonaws.services.s3.model.GeneratePresignedUrlRequest;
 import com.amazonaws.services.s3.model.ObjectMetadata;
 import com.amazonaws.services.s3.model.PutObjectRequest;
 import com.conveyal.r5.analyst.Grid;
@@ -12,9 +10,9 @@ import com.conveyal.taui.AnalysisServerException;
 import com.conveyal.taui.grids.SeamlessCensusGridExtractor;
 import com.conveyal.taui.models.Region;
 import com.conveyal.taui.persistence.Persistence;
+import com.conveyal.taui.persistence.StorageService;
 import com.conveyal.taui.util.Jobs;
 import com.conveyal.taui.util.JsonUtil;
-import com.conveyal.taui.util.WrappedURL;
 import com.google.common.io.Files;
 import org.apache.commons.fileupload.FileItem;
 import org.apache.commons.fileupload.FileItemFactory;
@@ -30,7 +28,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.net.URL;
+import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Date;
@@ -56,6 +54,11 @@ public class OpportunityDatasetsController {
     private static final FileItemFactory fileItemFactory = new DiskFileItemFactory();
 
     /**
+     * How long request URLs are good for
+     */
+    private static final int REQUEST_TIMEOUT_MSEC = 60 * 1000 * 60; // one hour
+
+    /**
      * Store upload status objects
      */
     private static List<OpportunityDatasetUploadStatus> uploadStatuses = new ArrayList<>();
@@ -66,43 +69,14 @@ public class OpportunityDatasetsController {
         uploadStatuses.removeIf(s -> s.completedAt != null && LocalDateTime.parse(s.completedAt.toString()).isBefore(now.minusDays(7)));
     }
 
-    /**
-     * How long request URLs are good for
-     */
-    public static final int REQUEST_TIMEOUT_MSEC = 15 * 1000;
-
-    public static Object getOpportunityDataset(Request req, Response res) {
-        // TODO handle offline mode
+    private static InputStream getOpportunityDataset(Request req, Response res) throws IOException {
         Date expiration = new Date();
         expiration.setTime(expiration.getTime() + REQUEST_TIMEOUT_MSEC);
 
         // TODO check region membership
 
         String key = String.format("%s/%s.grid", req.params("regionId"), req.params("gridId"));
-
-        GeneratePresignedUrlRequest presigned = new GeneratePresignedUrlRequest(AnalysisServerConfig.gridBucket, key);
-        presigned.setExpiration(expiration);
-        presigned.setMethod(HttpMethod.GET);
-
-        URL url = s3.generatePresignedUrl(presigned);
-
-        boolean redirect = true;
-
-        try {
-            String redirectParam = req.queryParams("redirect");
-            if (redirectParam != null) redirect = Boolean.parseBoolean(redirectParam);
-        } catch (Exception e) {
-            // do nothing
-        }
-
-        if (redirect) {
-            res.redirect(url.toString());
-            res.status(302); // temporary redirect, this URL will soon expire
-            res.type("text/plain"); // override application/json default
-            return res;
-        } else {
-            return new WrappedURL(url);
-        }
+        return StorageService.Grids.getObject(key);
     }
 
     public static List<OpportunityDatasetUploadStatus> getRegionUploadStatuses(Request req, Response res) {
@@ -198,12 +172,13 @@ public class OpportunityDatasetsController {
         String gridId = request.params("gridId");
         Region region = Persistence.regions.get(regionId);
         boolean removed = region.opportunityDatasets.removeIf((od) -> od.key.equals(gridId));
+        String key = String.format("%s/%s.grid", regionId, gridId);
 
         if (!removed) {
             throw AnalysisServerException.NotFound("Opportunity dataset could not be found.");
         } else {
             Persistence.regions.updateByUserIfPermitted(region, request.attribute("email"), request.attribute("accessGroup"));
-            s3.deleteObject(AnalysisServerConfig.gridBucket, gridId);
+            StorageService.Grids.deleteObject(key);
             return null;
         }
     }

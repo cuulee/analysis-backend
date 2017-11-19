@@ -27,7 +27,7 @@ public class AnalysisServerConfig {
     }
 
     public static final String bundleBucket = getEnv("BUNDLE_BUCKET", null);
-    public static final String databaseName = getEnv("DATABASE_NAME", "scenario-editor");
+    public static final String databaseName = getEnv("DATABASE_NAME", "analysis-backend");
     public static final String databaseUri = getEnv("MONGOLAB_URI", null);
     public static final String auth0ClientId = getEnv("AUTH0_CLIENT_ID", null);
     public static final byte[] auth0Secret = new Base64(true).decode(getEnv("AUTH0_SECRET", null));

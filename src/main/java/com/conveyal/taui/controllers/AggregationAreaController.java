@@ -1,20 +1,14 @@
 package com.conveyal.taui.controllers;
 
-import com.amazonaws.HttpMethod;
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.AmazonS3Client;
-import com.amazonaws.services.s3.model.GeneratePresignedUrlRequest;
 import com.amazonaws.services.s3.model.ObjectMetadata;
 import com.conveyal.r5.analyst.Grid;
-import com.conveyal.r5.util.S3Util;
 import com.conveyal.r5.util.ShapefileReader;
-import com.conveyal.taui.AnalysisServerConfig;
 import com.conveyal.taui.AnalysisServerException;
 import com.conveyal.taui.grids.SeamlessCensusGridExtractor;
 import com.conveyal.taui.models.AggregationArea;
 import com.conveyal.taui.persistence.Persistence;
+import com.conveyal.taui.persistence.StorageService;
 import com.conveyal.taui.util.JsonUtil;
-import com.conveyal.taui.util.WrappedURL;
 import com.google.common.io.Files;
 import com.vividsolutions.jts.geom.Envelope;
 import com.vividsolutions.jts.geom.Geometry;
@@ -29,19 +23,13 @@ import org.slf4j.LoggerFactory;
 import spark.Request;
 import spark.Response;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.URL;
-import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
-import java.util.zip.GZIPOutputStream;
 
 import static spark.Spark.get;
 import static spark.Spark.post;
@@ -52,11 +40,9 @@ import static spark.Spark.post;
 public class AggregationAreaController {
     private static final Logger LOG = LoggerFactory.getLogger(AggregationAreaController.class);
 
-    private static final AmazonS3 s3 = new AmazonS3Client();
-
     private static final FileItemFactory fileItemFactory = new DiskFileItemFactory();
 
-    public static AggregationArea createAggregationArea (Request req, Response res) throws Exception {
+    private static AggregationArea createAggregationArea (Request req, Response res) throws Exception {
         ServletFileUpload sfu = new ServletFileUpload(fileItemFactory);
         Map<String, List<FileItem>> query = sfu.parseParameterMap(req.raw());
 
@@ -125,54 +111,22 @@ public class AggregationAreaController {
         aggregationArea.accessGroup = req.attribute("accessGroup");
         aggregationArea.createdBy = req.attribute("email");
 
-        File gridFile = new File(tempDir, "weights.grid");
-        OutputStream os = new GZIPOutputStream(new BufferedOutputStream(new FileOutputStream(gridFile)));
-        maskGrid.write(os);
-        os.close();
-
-        InputStream is = new BufferedInputStream(new FileInputStream(gridFile));
-        // can't use putObject with File when we have metadata . . .
-        S3Util.s3.putObject(AnalysisServerConfig.gridBucket, aggregationArea.getS3Key(), is, metadata);
-        is.close();
+        OutputStream outputStream = StorageService.Grids.getOutputStream(aggregationArea.getS3Key(), metadata);
+        maskGrid.write(outputStream);
+        outputStream.close();
 
         tempDir.delete();
 
         return Persistence.aggregationAreas.create(aggregationArea);
     }
 
-    public static Object getAggregationArea (Request req, Response res) {
-        String maskId = req.params("maskId");
-        String regionId = req.params("regionId");
-        boolean redirect = true;
-
-        try {
-            String redirectParam = req.queryParams("redirect");
-            if (redirectParam != null) redirect = Boolean.parseBoolean(redirectParam);
-        } catch (Exception e) {
-            // do nothing
-        }
-
-        AggregationArea aggregationArea = Persistence.aggregationAreas.findByIdIfPermitted(maskId, req.attribute("accessGroup"));
-
-        Date expiration = new Date();
-        expiration.setTime(expiration.getTime() + 60 * 1000);
-        GeneratePresignedUrlRequest request = new GeneratePresignedUrlRequest(AnalysisServerConfig.gridBucket, aggregationArea.getS3Key(), HttpMethod.GET);
-        request.setExpiration(expiration);
-
-        URL url = s3.generatePresignedUrl(request);
-
-        if (redirect) {
-            res.redirect(url.toString());
-            res.status(302); // temporary redirect, this URL will soon expire
-            res.type("text/plain"); // override application/json default
-            return res;
-        } else {
-            return new WrappedURL(url);
-        }
+    private static InputStream getAggregationArea (Request req, Response res) throws IOException {
+        AggregationArea aggregationArea = Persistence.aggregationAreas.findByIdFromRequestIfPermitted(req);
+        return StorageService.Grids.getObject(aggregationArea.getS3Key());
     }
 
     public static void register () {
-        get("/api/region/:regionId/aggregationArea/:maskId", AggregationAreaController::getAggregationArea, JsonUtil.objectMapper::writeValueAsString);
+        get("/api/region/:regionId/aggregationArea/:_id", AggregationAreaController::getAggregationArea, JsonUtil.objectMapper::writeValueAsString);
         post("/api/region/:regionId/aggregationArea", AggregationAreaController::createAggregationArea, JsonUtil.objectMapper::writeValueAsString);
     }
 }

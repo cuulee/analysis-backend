@@ -1,15 +1,13 @@
 package com.conveyal.taui.models;
 
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.AmazonS3Client;
 import com.conveyal.gtfs.GTFSCache;
 import com.conveyal.gtfs.GTFSFeed;
 import com.conveyal.r5.analyst.cluster.BundleManifest;
-import com.conveyal.taui.AnalysisServerConfig;
+import com.conveyal.taui.persistence.StorageService;
 import com.conveyal.taui.util.JsonUtil;
 
-import java.io.File;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -41,21 +39,14 @@ public class Bundle extends Model implements Cloneable {
 
     public String errorCode;
 
-    private static final AmazonS3 s3 = new AmazonS3Client();
-
     public void writeManifestToCache () throws IOException {
         BundleManifest manifest = new BundleManifest();
         manifest.osmId = this.regionId;
         manifest.gtfsIds = this.feeds.stream().map(f -> f.bundleScopedFeedId).collect(Collectors.toList());
-        File cacheDir = new File(AnalysisServerConfig.localCache);
-        String manifestFileName = GTFSCache.cleanId(this._id) + ".json";
-        File manifestFile = new File(cacheDir, manifestFileName);
-        JsonUtil.objectMapper.writeValue(manifestFile, manifest);
 
-        if (!AnalysisServerConfig.offline) {
-            // upload to cache bucket
-            s3.putObject(AnalysisServerConfig.bundleBucket, manifestFileName, manifestFile);
-        }
+        String manifestFileName = GTFSCache.cleanId(this._id) + ".json";
+        OutputStream outputStream = StorageService.Bundles.getOutputStream(manifestFileName, null);
+        JsonUtil.objectMapper.writeValue(outputStream, manifest);
     }
 
     public Bundle clone () {

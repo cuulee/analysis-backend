@@ -1,46 +1,22 @@
 package com.conveyal.taui.models;
 
+import com.conveyal.r5.analyst.cluster.GridResultAssembler;
 import com.conveyal.r5.analyst.cluster.RegionalTask;
-import com.conveyal.taui.analysis.RegionalAnalysisManager;
+import com.conveyal.taui.LocalBroker;
 import com.fasterxml.jackson.annotation.JsonView;
-import com.vividsolutions.jts.geom.Envelope;
-import com.vividsolutions.jts.geom.Geometry;
 
-import static com.conveyal.r5.analyst.Grid.latToPixel;
-import static com.conveyal.r5.analyst.Grid.lonToPixel;
+import java.io.Serializable;
 
 /**
  * Represents a query.
  */
 public class RegionalAnalysis extends Model implements Cloneable {
     public String regionId;
-    public String bundleId;
     public String projectId;
+    public int variantIndex;
+    public String bundleId;
 
-    public int variant;
-
-    public String workerVersion;
-
-    public int zoom;
-    public int width;
-    public int height;
-    public int north;
-    public int west;
     public RegionalTask request;
-
-    /** Percentile this analysis is using, or -1 if it is pre-percentiles and is using Andrew Owen-style accessibility */
-    public int travelTimePercentile = -1;
-
-    public String grid;
-    public int cutoffMinutes;
-
-    /**
-     * A geometry defining the bounds of this regional analysis.
-     * For now, we will use the bounding box of this geometry, but eventually we should figure out which
-     * points should be included and only include those points. When you have an irregular analysis region,
-     * See also: https://commons.wikimedia.org/wiki/File:The_Gerry-Mander_Edit.png
-     */
-    public Geometry bounds;
 
     /** Is this Analysis complete? */
     public boolean complete;
@@ -48,33 +24,32 @@ public class RegionalAnalysis extends Model implements Cloneable {
     /** Has this analysis been (soft) deleted? */
     public boolean deleted;
 
+    /** Is this Owen style accessibility? */
+    public boolean isOwen = false;
+
+    public static final class RegionalAnalysisStatus implements Serializable {
+        public int total;
+        public int complete;
+
+        public RegionalAnalysisStatus (GridResultAssembler assembler) {
+            total = assembler.nTotal;
+            complete = assembler.nComplete;
+        }
+    }
+
     // TODO do statuses differently
     @JsonView(JsonViews.Api.class)
-    public RegionalAnalysisManager.RegionalAnalysisStatus getStatus () {
-        return RegionalAnalysisManager.getStatus(this._id);
+    public RegionalAnalysisStatus getStatus () {
+        GridResultAssembler assembler = LocalBroker.getJob(this._id);
+        return assembler != null ? new RegionalAnalysisStatus(assembler) : null;
     }
 
     /**
      * Using JsonViews doesn't work in the database currently due to https://github.com/mongojack/mongojack/issues/145,
      * so the status is saved in the db if anything about the regional analysis is changed.
      */
-    public void setStatus (RegionalAnalysisManager.RegionalAnalysisStatus status) {
+    public void setStatus (RegionalAnalysisStatus status) {
         // status is not intended to be persisted, ignore it.
-    }
-
-    public void computeBoundingBoxFromBounds () {
-        Envelope bbox = bounds.getEnvelopeInternal();
-        west = lonToPixel(bbox.getMinX(), zoom);
-        width = lonToPixel(bbox.getMaxX(), zoom) - west;
-        north = latToPixel(bbox.getMaxY(), zoom);
-        height = latToPixel(bbox.getMinY(), zoom) - north;
-    }
-
-    public void computeBoundingBoxFromRegion (Region region) {
-        west = lonToPixel(region.bounds.west, zoom);
-        width = lonToPixel(region.bounds.east, zoom) - west;
-        north = latToPixel(region.bounds.north, zoom);
-        height = latToPixel(region.bounds.south, zoom) - north;
     }
 
     public RegionalAnalysis clone () {

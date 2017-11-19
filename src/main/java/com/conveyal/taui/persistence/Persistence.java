@@ -39,7 +39,7 @@ public class Persistence {
     public static MongoMap<Bookmark> bookmarks;
     public static MongoMap<AggregationArea> aggregationAreas;
 
-    public static void initialize () {
+    static {
         LOG.info("Connecting to MongoDB...");
         // allow configurable db connection params
         if (AnalysisServerConfig.databaseUri != null) {

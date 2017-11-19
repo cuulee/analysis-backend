@@ -28,7 +28,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
-import java.util.AbstractMap;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -40,33 +39,34 @@ import java.util.zip.GZIPOutputStream;
  * retrieving the sampling distribution at a particular point in a regional analysis for display in the client.
  */
 public class TiledAccessGrid {
+    private static final String RESULTS_BUCKET = AnalysisServerConfig.resultsBucket;
+
     private static final Logger LOG = LoggerFactory.getLogger(TiledAccessGrid.class);
     /**
      * Version of TiledAccessGrid format.
      * This is used for simple S3 cachebusting by putting the version in the filename. If you change the format (including the
      * chunk size, below), increment this number to cause the indices to be rebuilt.
      */
-    public static final int VERSION = 0;
+    private static final int VERSION = 0;
 
     /** Size of one tile */
-    public static final int TILE_SIZE = 64;
-
-    /** Bucket where access grid is stored */
-    public final String bucketName;
+    private static final int TILE_SIZE = 64;
 
     /** Key of acccess grid we're indexing */
-    public final String key;
+    private final String key;
 
     /** The header of the access grid */
     private Header header;
 
+    private static final String HEADER_STRING = "ACCESSGR";
+
     /** LoadingCache used so that repeated requests while index is building won't build index multiple times */
-    private static LoadingCache<Map.Entry<String, String>, TiledAccessGrid> cache = CacheBuilder.newBuilder()
+    private static LoadingCache<String, TiledAccessGrid> cache = CacheBuilder.newBuilder()
             .maximumSize(5)
-            .build(new CacheLoader<Map.Entry<String, String>, TiledAccessGrid>() {
+            .build(new CacheLoader<String, TiledAccessGrid>() {
                 @Override
-                public TiledAccessGrid load(Map.Entry<String, String> compositeKey) throws Exception {
-                    return new TiledAccessGrid(compositeKey.getKey(), compositeKey.getValue());
+                public TiledAccessGrid load(String key) {
+                    return new TiledAccessGrid(key);
                 }
             });
 
@@ -74,21 +74,21 @@ public class TiledAccessGrid {
     private static File cacheDir = new File(AnalysisServerConfig.localCache, "acccess-grids");
 
     /** Cache access grid tiles on local disk so we don't always have to pull from S3 */
-    private static LoadingCache<Map.Entry<String, String>, File> tileCache = CacheBuilder.newBuilder()
+    private static LoadingCache<String, File> tileCache = CacheBuilder.newBuilder()
             .maximumSize(50)
             // delete files when they drop out of the cache.
             // It is possible this would delete a file someone is using, but unlikely, because the files are only open for
             // a matter of milliseconds after being pulled from this cache.
-            .removalListener((RemovalListener<Map.Entry<String, String>, File>) removalNotification -> removalNotification.getValue().delete())
-            .build(new CacheLoader<Map.Entry<String, String>, File>() {
+            .removalListener((RemovalListener<String, File>) removalNotification -> removalNotification.getValue().delete())
+            .build(new CacheLoader<String, File>() {
                 @Override
-                public File load(Map.Entry<String, String> compositeKey) throws Exception {
-                    File bucketDir = new File(cacheDir, compositeKey.getKey());
+                public File load(String key) throws Exception {
+                    File bucketDir = new File(cacheDir, RESULTS_BUCKET);
                     bucketDir.mkdirs();
-                    File cacheFile = new File(bucketDir, compositeKey.getValue());
+                    File cacheFile = new File(bucketDir, key);
                     // gunzip here so that we can do random access within file.
                     InputStream is =
-                            new GZIPInputStream(S3Util.s3.getObject(compositeKey.getKey(), compositeKey.getValue()).getObjectContent());
+                            new GZIPInputStream(StorageService.Results.getObject(key));
                     OutputStream os = new BufferedOutputStream(new FileOutputStream(cacheFile));
                     ByteStreams.copy(is, os);
                     is.close();
@@ -103,8 +103,7 @@ public class TiledAccessGrid {
      * This is private; use the static get method below. We do this so we can hand off to Guava issues of making sure
      * this isn't called multiple times for the same grid.
      */
-    private TiledAccessGrid(String bucketName, String key) {
-        this.bucketName = bucketName;
+    private TiledAccessGrid(String key) {
         this.key = key;
 
         readOrBuild();
@@ -122,7 +121,7 @@ public class TiledAccessGrid {
 
     /** Check if the tiles are already built, read the header if they are, and build them otherwise */
     private void readOrBuild () {
-        if (S3Util.s3.doesObjectExist(bucketName, getHeaderKey())) {
+        if (StorageService.Results.exists(getHeaderKey())) {
             read();
         } else {
             build();
@@ -174,7 +173,7 @@ public class TiledAccessGrid {
 
                     return 0;
                 }
-            }.compute(bucketName, key);
+            }.compute(RESULTS_BUCKET, key);
 
             LOG.info("Converted access grid {} to {} tiles", key, files.size());
 
@@ -188,7 +187,7 @@ public class TiledAccessGrid {
                     ByteStreams.copy(is, os);
                     is.close();
                     os.close();
-                    S3Util.s3.putObject(bucketName, key, gzipFile);
+                    S3Util.s3.putObject(RESULTS_BUCKET, key, gzipFile);
                     writer.file.delete();
                     gzipFile.delete();
                 } catch (IOException e) {
@@ -204,7 +203,7 @@ public class TiledAccessGrid {
             InputStream headerInputStream = new ByteArrayInputStream(headerOutputStream.toByteArray());
             ObjectMetadata metadata = new ObjectMetadata();
             metadata.setContentType("application/json");
-            S3Util.s3.putObject(bucketName, getHeaderKey(), headerInputStream, metadata);
+            S3Util.s3.putObject(RESULTS_BUCKET, getHeaderKey(), headerInputStream, metadata);
             headerInputStream.close();
 
             LOG.info("Done saving tiled access grid to S3");
@@ -216,7 +215,7 @@ public class TiledAccessGrid {
     /** Read an already-tiled access grid */
     private void read () {
         try {
-            InputStream is = S3Util.s3.getObject(bucketName, getHeaderKey()).getObjectContent();
+            InputStream is = StorageService.Results.getObject(getHeaderKey());
             this.header = JsonUtil.objectMapper.readValue(is, Header.class);
             is.close();
         } catch (IOException e) {
@@ -225,7 +224,7 @@ public class TiledAccessGrid {
     }
 
     /** Get the values at the given coordinates in the original access grid (relative to the grid west and north edges) */
-    public int[] getGridCoordinates (int x, int y) {
+    private int[] getGridCoordinates (int x, int y) throws ExecutionException, IOException {
         // return all zeros if we're outside the grid
         if (x < 0 || y < 0 || x >= header.width || y >= header.height) return new int[header.nValuesPerPixel];
 
@@ -234,69 +233,64 @@ public class TiledAccessGrid {
         // transform x and y to be tile relative
         int tileRelativeX = x % TILE_SIZE;
         int tileRelativeY = y % TILE_SIZE;
-        try {
-            File cacheFile = tileCache.get(new AbstractMap.SimpleEntry<>(bucketName, tileKey));
-            RandomAccessFile tile = new RandomAccessFile(cacheFile, "r");
 
-            byte[] header = new byte[8];
-            for (int i = 0; i < 8; i++) header[i] = tile.readByte();
-            String headerStr = new String(header);
+        File cacheFile = tileCache.get(tileKey);
+        RandomAccessFile tile = new RandomAccessFile(cacheFile, "r");
 
-            if (!"ACCESSGR".equals(headerStr)) throw new IllegalStateException("Tile is not in Access Grid format!");
-            if (tile.readInt() != 0) throw new IllegalStateException("Invalid access grid tile version!");
+        byte[] header = new byte[8];
+        for (int i = 0; i < 8; i++) header[i] = tile.readByte();
+        String headerStr = new String(header);
 
-            tile.seek(24); // seek to width
-            int width = readIntLittleEndian(tile);
-            int height = readIntLittleEndian(tile);
-            if (width != TILE_SIZE || height != TILE_SIZE) throw new IllegalStateException("Invalid access grid tile size!");
+        if (!headerStr.equals(HEADER_STRING)) throw new IllegalStateException("Tile is not in Access Grid format!");
+        if (tile.readInt() != 0) throw new IllegalStateException("Invalid access grid tile version!");
 
-            long nValuesPerPixel = readIntLittleEndian(tile);
-            // 4 bytes per value
-            long offset = AccessGridWriter.HEADER_SIZE + ((long) tileRelativeY * (long) width + (long) tileRelativeX) * (long) nValuesPerPixel * 4L;
-            tile.seek(offset);
+        tile.seek(24); // seek to width
+        int width = readIntLittleEndian(tile);
+        int height = readIntLittleEndian(tile);
+        if (width != TILE_SIZE || height != TILE_SIZE) throw new IllegalStateException("Invalid access grid tile size!");
 
-            int[] values = new int[(int) nValuesPerPixel];
+        long nValuesPerPixel = readIntLittleEndian(tile);
+        // 4 bytes per value
+        long offset = AccessGridWriter.HEADER_SIZE + ((long) tileRelativeY * (long) width + (long) tileRelativeX) * (long) nValuesPerPixel * 4L;
+        tile.seek(offset);
 
-            // read and de-delta-code
-            for (int i = 0, val = 0; i < nValuesPerPixel; i++) {
-                values[i] = (val += readIntLittleEndian(tile));
-            }
+        int[] values = new int[(int) nValuesPerPixel];
 
-            return values;
-        } catch (IOException | ExecutionException e) {
-            throw new RuntimeException(e);
+        // read and de-delta-code
+        for (int i = 0, val = 0; i < nValuesPerPixel; i++) {
+            values[i] = (val += readIntLittleEndian(tile));
         }
+
+        return values;
     }
 
     /** Get the values at a particular latitude and longitude in this TiledAccessGrid */
-    public int[] getLatLon (double lat, double lon) {
+    public int[] getLatLon (double lat, double lon) throws ExecutionException, IOException {
         int x = Grid.lonToPixel(lon, header.zoom) - header.west;
         int y = Grid.latToPixel(lat, header.zoom) - header.north;
         return getGridCoordinates(x, y);
     }
 
-    /** Get a TiledAccessGrid for the given (untiled) AccessGrid in S3, building it if necessary */
-    public static TiledAccessGrid get (String bucketName, String key) {
-        Map.Entry<String, String> compositeKey = new AbstractMap.SimpleEntry<String, String>(bucketName, key);
-        try {
-            return cache.get(compositeKey);
-        } catch (ExecutionException e) {
-            throw new RuntimeException(e);
-        }
+    private static String idToAccessFileName (String id) {
+        return String.format("%s.access", id);
+    }
+
+    public static TiledAccessGrid get (String id) throws ExecutionException {
+        return cache.get(idToAccessFileName(id));
     }
 
     /** this class will be JSON-serialized to represent header of original access grid */
     private static class Header {
-        public int zoom = -1;
-        public int west = -1;
-        public int north = -1;
-        public int width = -1;
-        public int height = -1;
-        public int nValuesPerPixel = -1;
+        int zoom = -1;
+        int west = -1;
+        int north = -1;
+        int width = -1;
+        int height = -1;
+        int nValuesPerPixel = -1;
     }
 
     /** The default read methods all use "network byte order" (big-endian), write a custom function using little-endian byte order */
-    public static int readIntLittleEndian (RandomAccessFile file) throws IOException {
+    private static int readIntLittleEndian (RandomAccessFile file) throws IOException {
         byte b1 = (byte) file.read();
         byte b2 = (byte) file.read();
         byte b3 = (byte) file.read();

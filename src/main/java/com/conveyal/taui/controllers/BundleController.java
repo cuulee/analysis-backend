@@ -1,14 +1,11 @@
 package com.conveyal.taui.controllers;
 
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.AmazonS3Client;
-import com.amazonaws.services.s3.model.ObjectMetadata;
-import com.conveyal.gtfs.api.ApiMain;
 import com.conveyal.gtfs.api.models.FeedSource;
-import com.conveyal.taui.AnalysisServerConfig;
 import com.conveyal.taui.AnalysisServerException;
 import com.conveyal.taui.models.Bundle;
+import com.conveyal.taui.persistence.GTFSPersistence;
 import com.conveyal.taui.persistence.Persistence;
+import com.conveyal.taui.persistence.StorageService;
 import com.conveyal.taui.util.JsonUtil;
 import com.google.common.io.Files;
 import gnu.trove.list.TDoubleList;
@@ -44,8 +41,6 @@ import static spark.Spark.put;
 public class BundleController {
     private static final Logger LOG = LoggerFactory.getLogger(BundleController.class);
 
-    private static final AmazonS3 s3 = new AmazonS3Client();
-
     public static Bundle create (Request req, Response res) {
         ServletFileUpload sfu = new ServletFileUpload(fileItemFactory);
 
@@ -75,16 +70,11 @@ public class BundleController {
         try {
             // cache bundle on disk to avoid OOME
             bundleFile = File.createTempFile(bundle._id, ".zip");
-
-            ObjectMetadata om = new ObjectMetadata();
-            om.setContentType("application/zip");
-
             Set<String> usedFileNames = new HashSet<>();
 
             for (FileItem fi : files.get("files")) {
                 // create a unique, safe file name
-                String baseName = fi.getName().replace(".zip", "").replaceAll("[^a-zA-Z0-9]", "-");
-                String fname = baseName;
+                String fname = fi.getName().replace(".zip", "").replaceAll("[^a-zA-Z0-9]", "-");
 
                 int i = 0;
                 while (usedFileNames.contains(fname)) {
@@ -127,7 +117,7 @@ public class BundleController {
             Map<String, FeedSource> feeds = localFiles.stream()
                     .map(file -> {
                         try {
-                            FeedSource fs = ApiMain.registerFeedSource(feed -> String.format("%s_%s", feed.feedId, bundle._id), file);
+                            FeedSource fs = GTFSPersistence.registerFeedSource(feed -> String.format("%s_%s", feed.feedId, bundle._id), file);
                             bundle.feedsComplete += 1;
                             Persistence.bundles.put(bundle);
                             return fs;
@@ -193,11 +183,7 @@ public class BundleController {
 
     public static Bundle deleteBundle (Request req, Response res) {
         Bundle bundle = Persistence.bundles.removeIfPermitted(req.params("_id"), req.attribute("accessGroup"));
-
-        if (AnalysisServerConfig.bundleBucket != null) {
-            // remove from s3
-            s3.deleteObject(AnalysisServerConfig.bundleBucket, bundle._id + ".zip");
-        }
+        StorageService.Bundles.deleteObject(bundle._id + ".zip");
 
         return bundle;
     }
