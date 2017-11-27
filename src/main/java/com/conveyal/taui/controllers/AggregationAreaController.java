@@ -13,7 +13,6 @@ import com.google.common.io.Files;
 import com.vividsolutions.jts.geom.Envelope;
 import com.vividsolutions.jts.geom.Geometry;
 import com.vividsolutions.jts.operation.union.UnaryUnionOp;
-import gnu.trove.map.TObjectDoubleMap;
 import org.apache.commons.fileupload.FileItem;
 import org.apache.commons.fileupload.FileItemFactory;
 import org.apache.commons.fileupload.disk.DiskFileItemFactory;
@@ -93,10 +92,9 @@ public class AggregationAreaController {
         Grid maskGrid = new Grid(SeamlessCensusGridExtractor.ZOOM, env.getMaxY(), env.getMaxX(), env.getMinY(), env.getMinX());
 
         // Store the percentage each cell overlaps the mask, scaled as 0 to 100,000
-        TObjectDoubleMap<int[]> weights = maskGrid.getPixelWeights(merged, true);
-        weights.forEachEntry((pixel, weight) -> {
-            maskGrid.grid[pixel[0]][pixel[1]] = weight * 100_000;
-            return true;
+        List<Grid.PixelWeight> weights = maskGrid.getPixelWeights(merged, true);
+        weights.forEach(pw -> {
+            maskGrid.grid[pw.x][pw.y] = pw.weight * 100_000;
         });
 
         ObjectMetadata metadata = new ObjectMetadata();
@@ -122,7 +120,7 @@ public class AggregationAreaController {
 
     private static InputStream getAggregationArea (Request req, Response res) throws IOException {
         AggregationArea aggregationArea = Persistence.aggregationAreas.findByIdFromRequestIfPermitted(req);
-        return StorageService.Grids.getObject(aggregationArea.getS3Key());
+        return StorageService.Grids.getInputStream(aggregationArea.getS3Key());
     }
 
     public static void register () {

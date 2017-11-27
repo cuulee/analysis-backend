@@ -1,6 +1,7 @@
 package com.conveyal.taui.controllers;
 
 import com.conveyal.osmlib.OSM;
+import com.conveyal.taui.AnalysisServerConfig;
 import com.conveyal.taui.AnalysisServerException;
 import com.conveyal.taui.grids.SeamlessCensusGridExtractor;
 import com.conveyal.taui.models.Region;
@@ -20,6 +21,7 @@ import spark.Response;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +37,7 @@ import static spark.Spark.put;
 public class RegionController {
     private static final Logger LOG = LoggerFactory.getLogger(RegionController.class);
     private static final FileItemFactory fileItemFactory = new DiskFileItemFactory();
+    private static final boolean OFFLINE = AnalysisServerConfig.offline;
 
     public static Region getRegion (Request req, Response res) {
         return Persistence.regions.findByIdFromRequestIfPermitted(req);
@@ -76,6 +79,10 @@ public class RegionController {
     }
 
     private static synchronized List<Region.OpportunityDataset> fetchCensus (Region region) throws Exception {
+        if (OFFLINE) {
+            LOG.info("Skipping fetching census data in OFFLINE mode.");
+            return new ArrayList<>();
+        }
         // Set the region status
         region.statusCode = Region.StatusCode.DOWNLOADING_CENSUS;
         region = Persistence.regions.put(region);
@@ -112,7 +119,7 @@ public class RegionController {
                 region.statusMessage = "Error while fetching data. " + e.getMessage();
                 Persistence.regions.put(region);
 
-                LOG.error("Error while fetching OSM. " + e.getMessage());
+                LOG.error("Error while fetching data. " + e.getMessage());
                 e.printStackTrace();
             }
         }).start();

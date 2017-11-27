@@ -26,7 +26,7 @@ public class AnalysisServerConfig {
         }
     }
 
-    public static final String bundleBucket = getEnv("BUNDLE_BUCKET", null);
+    public static final String bundleBucket = getEnv("BUNDLE_BUCKET", "bundles");
     public static final String databaseName = getEnv("DATABASE_NAME", "analysis-backend");
     public static final String databaseUri = getEnv("MONGOLAB_URI", null);
     public static final String auth0ClientId = getEnv("AUTH0_CLIENT_ID", null);
@@ -38,8 +38,8 @@ public class AnalysisServerConfig {
     public static final String brokerUrl = getEnv("BROKER_URL", "http://localhost:9001");
     public static final String vexUrl = getEnv("VEX_URL", "http://osm.conveyal.com/vex");
     public static final String seamlessCensusBucket = getEnv("SEAMLESS_CENSUS_BUCKET", "lodes-data-2014");
-    public static final String gridBucket = getEnv("GRID_BUCKET", null);
-    public static final String resultsBucket = getEnv("RESULTS_BUCKET", null);
+    public static final String gridBucket = getEnv("GRID_BUCKET", "grids");
+    public static final String resultsBucket = getEnv("RESULTS_BUCKET", "results");
     public static final String resultsQueue = getEnv("RESULTS_QUEUE", null);
     public static final String region = getEnv("REGION", "eu-west-1");
 

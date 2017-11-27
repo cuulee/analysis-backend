@@ -76,7 +76,7 @@ public class OpportunityDatasetsController {
         // TODO check region membership
 
         String key = String.format("%s/%s.grid", req.params("regionId"), req.params("gridId"));
-        return StorageService.Grids.getObject(key);
+        return StorageService.Grids.getInputStream(key);
     }
 
     public static List<OpportunityDatasetUploadStatus> getRegionUploadStatuses(Request req, Response res) {

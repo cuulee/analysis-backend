@@ -39,9 +39,13 @@ import java.util.zip.GZIPOutputStream;
  * retrieving the sampling distribution at a particular point in a regional analysis for display in the client.
  */
 public class TiledAccessGrid {
+    private static final String HEADER_STRING = "ACCESSGR";
+    private static final Logger LOG = LoggerFactory.getLogger(TiledAccessGrid.class);
     private static final String RESULTS_BUCKET = AnalysisServerConfig.resultsBucket;
 
-    private static final Logger LOG = LoggerFactory.getLogger(TiledAccessGrid.class);
+    /** Size of one tile */
+    private static final int TILE_SIZE = 64;
+
     /**
      * Version of TiledAccessGrid format.
      * This is used for simple S3 cachebusting by putting the version in the filename. If you change the format (including the
@@ -49,16 +53,11 @@ public class TiledAccessGrid {
      */
     private static final int VERSION = 0;
 
-    /** Size of one tile */
-    private static final int TILE_SIZE = 64;
-
     /** Key of acccess grid we're indexing */
     private final String key;
 
     /** The header of the access grid */
     private Header header;
-
-    private static final String HEADER_STRING = "ACCESSGR";
 
     /** LoadingCache used so that repeated requests while index is building won't build index multiple times */
     private static LoadingCache<String, TiledAccessGrid> cache = CacheBuilder.newBuilder()
@@ -88,7 +87,7 @@ public class TiledAccessGrid {
                     File cacheFile = new File(bucketDir, key);
                     // gunzip here so that we can do random access within file.
                     InputStream is =
-                            new GZIPInputStream(StorageService.Results.getObject(key));
+                            new GZIPInputStream(StorageService.Results.getInputStream(key));
                     OutputStream os = new BufferedOutputStream(new FileOutputStream(cacheFile));
                     ByteStreams.copy(is, os);
                     is.close();
@@ -215,7 +214,7 @@ public class TiledAccessGrid {
     /** Read an already-tiled access grid */
     private void read () {
         try {
-            InputStream is = StorageService.Results.getObject(getHeaderKey());
+            InputStream is = StorageService.Results.getInputStream(getHeaderKey());
             this.header = JsonUtil.objectMapper.readValue(is, Header.class);
             is.close();
         } catch (IOException e) {

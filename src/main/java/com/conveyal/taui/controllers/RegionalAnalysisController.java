@@ -8,6 +8,7 @@ import com.conveyal.r5.analyst.cluster.RegionalTask;
 import com.conveyal.taui.AnalysisServerException;
 import com.conveyal.taui.LocalBroker;
 import com.conveyal.taui.models.AnalysisRequest;
+import com.conveyal.taui.models.Project;
 import com.conveyal.taui.models.RegionalAnalysis;
 import com.conveyal.taui.persistence.Persistence;
 import com.conveyal.taui.persistence.StorageService;
@@ -23,7 +24,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Collection;
-import java.util.zip.GZIPOutputStream;
 
 import static spark.Spark.delete;
 import static spark.Spark.get;
@@ -79,7 +79,7 @@ public class RegionalAnalysisController {
         if (!StorageService.Results.exists(percentileGridKey)) {
             long computeStart = System.currentTimeMillis();
             // make the grid
-            Grid grid = new SelectingGridReducer(0).compute(StorageService.Results.getObject(accessGridKey));
+            Grid grid = new SelectingGridReducer(0).compute(StorageService.Results.getInputStream(accessGridKey));
             LOG.info("Building grid took {}s", (System.currentTimeMillis() - computeStart) / 1000d);
 
             ObjectMetadata om = new ObjectMetadata();
@@ -95,7 +95,7 @@ public class RegionalAnalysisController {
             OutputStream outputStream = StorageService.Results.getOutputStream(percentileGridKey, om);
 
             if ("grid".equals(format)) {
-                grid.write(new GZIPOutputStream(outputStream));
+                grid.write(outputStream);
             } else if ("png".equals(format)) {
                 grid.writePng(outputStream);
             } else if ("tiff".equals(format)) {
@@ -103,7 +103,7 @@ public class RegionalAnalysisController {
             }
         }
 
-        return StorageService.Results.getObject(percentileGridKey);
+        return StorageService.Results.getInputStream(percentileGridKey);
     }
 
     /** Get a probability of improvement from a baseline to a project */
@@ -124,7 +124,7 @@ public class RegionalAnalysisController {
             // p-value/hypothesis test computer. Otherwise use the older setup.
             // TODO should all comparisons use the bootstrap computer? the only real difference is that it is two-tailed.
             BootstrapPercentileMethodHypothesisTestGridReducer computer = new BootstrapPercentileMethodHypothesisTestGridReducer();
-            Grid grid = computer.computeImprovementProbability(StorageService.Results.getObject(baseKey), StorageService.Results.getObject(projectKey));
+            Grid grid = computer.computeImprovementProbability(StorageService.Results.getInputStream(baseKey), StorageService.Results.getInputStream(projectKey));
 
             ObjectMetadata om = new ObjectMetadata();
             if ("grid".equals(format)) {
@@ -138,7 +138,7 @@ public class RegionalAnalysisController {
             OutputStream outputStream = StorageService.Results.getOutputStream(probabilitySurfaceKey, om);
 
             if ("grid".equals(format)) {
-                grid.write(new GZIPOutputStream(outputStream));
+                grid.write(outputStream);
             } else if ("png".equals(format)) {
                 grid.writePng(outputStream);
             } else if ("tiff".equals(format)) {
@@ -146,7 +146,7 @@ public class RegionalAnalysisController {
             }
         }
 
-        return StorageService.Results.getObject(probabilitySurfaceKey);
+        return StorageService.Results.getInputStream(probabilitySurfaceKey);
     }
 
     private static int[] getSamplingDistribution (Request req, Response res) {
@@ -166,10 +166,11 @@ public class RegionalAnalysisController {
     private static RegionalAnalysis createRegionalAnalysis (Request req, Response res) throws IOException {
         AnalysisRequest analysisRequest = JsonUtil.objectMapper.readValue(req.body(), AnalysisRequest.class);
         String accessGroup = req.attribute("accessGroup");
+        Project project = Persistence.projects.findByIdIfPermitted(analysisRequest.projectId, accessGroup);
 
-        RegionalTask task = (RegionalTask) analysisRequest.populateTask(new RegionalTask(), accessGroup);
+        RegionalTask task = (RegionalTask) analysisRequest.populateTask(new RegionalTask(), project);
 
-        task.grid = String.format("%s/%s.grid", analysisRequest.regionId, analysisRequest.opportunityDatasetKey);
+        task.grid = String.format("%s/%s.grid", project.regionId, analysisRequest.opportunityDatasetKey);
         task.outputQueue = LocalBroker.resultsQueueUrl;
         task.x = 0;
         task.y = 0;
@@ -178,7 +179,7 @@ public class RegionalAnalysisController {
 
         regionalAnalysis.accessGroup = accessGroup;
         regionalAnalysis.createdBy = req.attribute("email");
-        regionalAnalysis.regionId = analysisRequest.regionId;
+        regionalAnalysis.regionId = project.regionId;
         regionalAnalysis.projectId = analysisRequest.projectId;
         regionalAnalysis.name = analysisRequest.name;
         regionalAnalysis.request = task;

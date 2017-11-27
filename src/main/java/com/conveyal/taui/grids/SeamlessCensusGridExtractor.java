@@ -1,34 +1,24 @@
 package com.conveyal.taui.grids;
 
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.AmazonS3Client;
-import com.amazonaws.services.s3.model.ObjectMetadata;
-import com.amazonaws.services.s3.model.PutObjectRequest;
 import com.conveyal.data.census.S3SeamlessSource;
 import com.conveyal.data.geobuf.GeobufFeature;
 import com.conveyal.r5.analyst.Grid;
 import com.conveyal.taui.AnalysisServerConfig;
 import com.conveyal.taui.models.Bounds;
 import com.conveyal.taui.models.Region;
-import gnu.trove.map.TObjectDoubleMap;
+import com.conveyal.taui.persistence.StorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
-import java.util.zip.GZIPOutputStream;
 
 /**
  * Fetch data from the seamless-census s3 buckets and convert it from block-level vector data (polygons)
@@ -36,46 +26,21 @@ import java.util.zip.GZIPOutputStream;
  */
 public class SeamlessCensusGridExtractor {
     private static final Logger LOG = LoggerFactory.getLogger(SeamlessCensusGridExtractor.class);
-
-    private static final String gridBucket = AnalysisServerConfig.gridBucket;
-    private static final String seamlessCensusBucket = AnalysisServerConfig.seamlessCensusBucket;
+    private static final String SEAMLESS_BUCKET = AnalysisServerConfig.seamlessCensusBucket;
+    private static final S3SeamlessSource seamlessSource = SEAMLESS_BUCKET != null ? new S3SeamlessSource(SEAMLESS_BUCKET) : null;
 
     // The Web Mercator zoom level of the census data grids that will be created.
     public static final int ZOOM = 9;
-
-    // A pool of threads that upload newly created grids to S3. The pool is shared between all GridFetchers.
-    // The default policy when the pool's work queue is full is to abort with an exception.
-    // We shouldn't use the caller-runs policy because that will cause deadlocks.
-    private static final ThreadPoolExecutor s3Upload = new ThreadPoolExecutor(4, 8, 90, TimeUnit.SECONDS, new ArrayBlockingQueue<>(1024));
-    private static final AmazonS3 s3 = new AmazonS3Client();
-
-    /** Prepare an outputstream on S3, set up to gzip and upload whatever is uploaded in a thread. */
-    private static OutputStream getOutputStream (String s3Key) throws IOException {
-        PipedOutputStream outputStream = new PipedOutputStream();
-        PipedInputStream inputStream = new PipedInputStream(outputStream);
-
-        ObjectMetadata metadata = new ObjectMetadata();
-        metadata.setContentType("application/octet-stream");
-        metadata.setContentEncoding("gzip");
-        PutObjectRequest request = new PutObjectRequest(gridBucket, s3Key, inputStream, metadata);
-
-        // upload to s3 in a separate thread so that we don't deadlock
-        s3Upload.execute(() -> s3.putObject(request));
-
-        return new GZIPOutputStream(outputStream);
-    }
 
     /**
      * Retrieve data for bounds and save to a bucket under a given key
      */
     public static List<Region.OpportunityDataset> retrieveAndExtractCensusDataForBounds (Bounds bounds, String s3Key) throws IOException {
         long startTime = System.currentTimeMillis();
-
-        S3SeamlessSource source = new S3SeamlessSource(seamlessCensusBucket);
         Map<Long, GeobufFeature> features;
 
         // All the features are buffered in a Map in memory. This could be problematic on large areas.
-        features = source.extract(bounds.north, bounds.east, bounds.south, bounds.west, false);
+        features = seamlessSource.extract(bounds.north, bounds.east, bounds.south, bounds.west, false);
 
         if (features.isEmpty()) {
             LOG.info("No seamless census data found here, not pre-populating grids");
@@ -106,7 +71,7 @@ public class SeamlessCensusGridExtractor {
         for (GeobufFeature feature : features.values()) {
             if (++featIdx % 1000 == 0) LOG.info("{} / {} features read", featIdx, features.size());
 
-            TObjectDoubleMap<int[]> weights = null;
+            List<Grid.PixelWeight> weights = null;
 
             for (String attribute : attributes) {
 
@@ -136,19 +101,18 @@ public class SeamlessCensusGridExtractor {
 
             // First write out the grid itself to an object on S3.
             String outKey = String.format("%s/%s.grid", s3Key, cleanedAttributeName);
-            OutputStream os = getOutputStream(outKey);
+            OutputStream os = StorageService.Grids.getOutputStream(outKey);
             grid.write(os);
-            os.close();
+
             // Also write out a PNG as a preview of the grid's contents.
             // TODO remove this once debugging not necessary.
             String outPng = String.format("%s/%s.png", s3Key, cleanedAttributeName);
-            os = getOutputStream(outPng);
+            os = StorageService.Grids.getOutputStream(outPng);
             grid.writePng(os);
-            os.close();
 
             // Create an object representing this new destination density grid in the Analysis backend internal model.
             Region.OpportunityDataset opportunityDataset = new Region.OpportunityDataset();
-            opportunityDataset.dataSource = seamlessCensusBucket;
+            opportunityDataset.dataSource = SEAMLESS_BUCKET;
             opportunityDataset.name = attribute;
             opportunityDataset.key = cleanedAttributeName;
             opportunityDatasets.add(opportunityDataset);

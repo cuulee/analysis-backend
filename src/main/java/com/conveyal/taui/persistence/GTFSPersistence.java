@@ -13,17 +13,13 @@ public class GTFSPersistence {
     private static final boolean OFFLINE = AnalysisServerConfig.offline;
     private static final String LOCAL_CACHE_DIR = AnalysisServerConfig.localCache;
 
-    public static final FeedSourceCache cache;
+    public static final FeedSourceCache cache = OFFLINE
+            ? ApiMain.initialize(null, LOCAL_CACHE_DIR)
+            : ApiMain.initialize(AnalysisServerConfig.bundleBucket, LOCAL_CACHE_DIR);
 
     static {
         File cacheDir = new File(LOCAL_CACHE_DIR);
         cacheDir.mkdirs();
-
-        if (OFFLINE) {
-            cache = ApiMain.initialize(null, LOCAL_CACHE_DIR);
-        } else {
-            cache = ApiMain.initialize(AnalysisServerConfig.bundleBucket, LOCAL_CACHE_DIR);
-        }
     }
 
     public static FeedSource getFeedSource (String id) throws Exception {

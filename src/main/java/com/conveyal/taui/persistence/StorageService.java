@@ -16,6 +16,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.zip.GZIPOutputStream;
 
 public class StorageService {
     private static final Logger LOG = LoggerFactory.getLogger(StorageService.class);
@@ -27,10 +31,16 @@ public class StorageService {
     private static final String RESULTS_DIR = AnalysisServerConfig.resultsBucket;
 
     private static final AmazonS3 s3 = new AmazonS3Client();
+    private static final ThreadPoolExecutor s3Upload = new ThreadPoolExecutor(4, 8, 90, TimeUnit.SECONDS, new ArrayBlockingQueue<>(1024));
 
     public static final Bucket Bundles = OFFLINE ? new FileBucket(BUNDLE_DIR) : new S3Bucket(BUNDLE_DIR);
     public static final Bucket Grids = OFFLINE ? new FileBucket(GRID_DIR) : new S3Bucket(GRID_DIR);
     public static final Bucket Results = OFFLINE ? new FileBucket(RESULTS_DIR) : new S3Bucket(RESULTS_DIR);
+
+    static {
+        File cacheDir = new File(CACHE_DIR);
+        cacheDir.mkdirs();
+    }
 
     public abstract static class Bucket {
         String bucketName;
@@ -41,7 +51,7 @@ public class StorageService {
 
         public abstract boolean deleteObject (String key);
         public abstract boolean exists (String key);
-        public abstract InputStream getObject (String key) throws IOException;
+        public abstract InputStream getInputStream(String key) throws IOException;
         public abstract OutputStream getOutputStream (String key, ObjectMetadata metadata) throws IOException;
 
         public OutputStream getOutputStream (String key) throws IOException {
@@ -52,33 +62,24 @@ public class StorageService {
     public static class FileBucket extends Bucket {
         FileBucket (String bucketName) {
             super(bucketName);
-
-            // Make the local directory
-            File file = new File(pathForKey(bucketName));
-            file.mkdirs();
-            file.delete();
-        }
-
-        String pathForKey (String key) {
-            return String.format("%s/%s/%s", CACHE_DIR, bucketName, key);
         }
 
         public boolean deleteObject (String key) {
-            File file = new File(pathForKey(key));
+            File file = new File(CACHE_DIR, key);
             return file.delete();
         }
 
         public boolean exists (String key) {
-            File file = new File(pathForKey(key));
+            File file = new File(CACHE_DIR, key);
             return file.exists();
         }
 
-        public InputStream getObject (String key) throws FileNotFoundException {
-            return new FileInputStream(pathForKey(key));
+        public InputStream getInputStream(String key) throws FileNotFoundException {
+            return new FileInputStream(new File(CACHE_DIR, key));
         }
 
-        public OutputStream getOutputStream (String key, ObjectMetadata metadata) throws FileNotFoundException {
-            return new FileOutputStream(new File(pathForKey(key)));
+        public OutputStream getOutputStream (String key, ObjectMetadata metadata) throws IOException {
+            return new FileOutputStream(new File(CACHE_DIR, key));
         }
     }
 
@@ -101,7 +102,7 @@ public class StorageService {
             return s3.doesObjectExist(bucketName, key);
         }
 
-        public InputStream getObject (String key) {
+        public InputStream getInputStream(String key) {
             return s3.getObject(bucketName, key).getObjectContent();
         }
 
@@ -109,9 +110,13 @@ public class StorageService {
             PipedInputStream pipedInputStream = new PipedInputStream();
             PipedOutputStream pipedOutputStream = new PipedOutputStream(pipedInputStream);
 
-            s3.putObject(bucketName, key, pipedInputStream, metadata);
+            s3Upload.execute(() -> s3.putObject(bucketName, key, pipedInputStream, metadata));
 
-            return pipedOutputStream;
+            if (metadata != null && metadata.getContentEncoding().equals("gzip")) {
+                return new GZIPOutputStream(pipedOutputStream);
+            } else {
+                return pipedOutputStream;
+            }
         }
     }
 }
