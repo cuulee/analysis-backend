@@ -25,8 +25,9 @@ public class AdjustDwellTime extends Modification {
 
     public com.conveyal.r5.analyst.scenario.AdjustDwellTime toR5 () {
         com.conveyal.r5.analyst.scenario.AdjustDwellTime adt = new com.conveyal.r5.analyst.scenario.AdjustDwellTime();
+        adt.comment = name;
 
-        if (this.trips == null) {
+        if (trips == null) {
             adt.routes = feedScopeIds(feed, routes);
         } else {
             adt.patterns = feedScopeIds(feed, trips);

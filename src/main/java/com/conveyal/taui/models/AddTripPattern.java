@@ -44,6 +44,7 @@ public class AddTripPattern extends Modification {
 
     public AddTrips toR5 () {
         AddTrips at = new AddTrips();
+        at.comment = name;
 
         at.bidirectional = bidirectional;
         List<ModificationStop> stops = ModificationStop.getStopsFromSegments(segments);

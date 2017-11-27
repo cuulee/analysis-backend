@@ -20,7 +20,7 @@ public class RemoveStops extends Modification {
 
     public com.conveyal.r5.analyst.scenario.RemoveStops toR5 () {
         com.conveyal.r5.analyst.scenario.RemoveStops rs = new com.conveyal.r5.analyst.scenario.RemoveStops();
-
+        rs.comment = name;
         rs.stops = feedScopeIds(feed, stops);
 
         if (trips == null) {

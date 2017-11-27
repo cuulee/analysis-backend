@@ -25,6 +25,7 @@ public class AdjustSpeed extends Modification {
 
     public com.conveyal.r5.analyst.scenario.AdjustSpeed toR5 () {
         com.conveyal.r5.analyst.scenario.AdjustSpeed as = new com.conveyal.r5.analyst.scenario.AdjustSpeed();
+        as.comment = name;
 
         if (trips == null) {
             as.routes = feedScopeIds(feed, routes);

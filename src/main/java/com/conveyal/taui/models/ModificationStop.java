@@ -4,8 +4,7 @@ import com.conveyal.r5.analyst.scenario.StopSpec;
 import com.conveyal.taui.AnalysisServerException;
 import com.vividsolutions.jts.geom.Coordinate;
 import org.geotools.geometry.jts.JTS;
-import org.geotools.referencing.CRS;
-import org.opengis.referencing.FactoryException;
+import org.geotools.referencing.crs.DefaultGeographicCRS;
 import org.opengis.referencing.crs.CoordinateReferenceSystem;
 import org.opengis.referencing.operation.TransformException;
 
@@ -14,7 +13,7 @@ import java.util.List;
 import java.util.Stack;
 import java.util.stream.Collectors;
 
-public class ModificationStop {
+class ModificationStop {
     private static double MIN_SPACING_PERCENTAGE = 0.25;
 
     StopSpec stop;
@@ -32,13 +31,7 @@ public class ModificationStop {
 
     static List<ModificationStop> getStopsFromSegments (List<Segment> segments) {
         Stack<ModificationStop> stops = new Stack<>();
-        CoordinateReferenceSystem crs = null;
-
-        try {
-            crs = CRS.decode("WGS84");
-        } catch (FactoryException fe) {
-            throw AnalysisServerException.Unknown(fe.getMessage());
-        }
+        CoordinateReferenceSystem crs = DefaultGeographicCRS.WGS84;
 
         Segment firstSegment = segments.get(0);
         Coordinate firstStopCoord = firstSegment.geometry.getCoordinates()[0];
@@ -53,7 +46,7 @@ public class ModificationStop {
             for (int i = 1; i < coords.length; i++) {
                 Coordinate c0 = coords[i - 1];
                 Coordinate c1 = coords[i];
-                double distanceThisLineSegment = 0;
+                double distanceThisLineSegment;
                 try {
                     distanceThisLineSegment = JTS.orthodromicDistance(c0, c1, crs);
                 } catch (TransformException e) {
@@ -100,12 +93,12 @@ public class ModificationStop {
     }
 
     static int[] getDwellTimes (List<ModificationStop> stops, Integer[] dwellTimes, int defaultDwellTime) {
-        int[] stopDwellTimes = new int[stops.size() - 1];
+        int[] stopDwellTimes = new int[stops.size()];
 
         int realStopIndex = 0;
         for (int i = 0; i < stops.size(); i++) {
             String id = stops.get(i).stop.id;
-            if (id == null) {
+            if (id == null || dwellTimes == null) {
                 stopDwellTimes[i] = defaultDwellTime;
             } else {
                 Integer specificDwellTime = dwellTimes[realStopIndex];

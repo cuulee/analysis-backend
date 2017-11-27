@@ -2,7 +2,6 @@ package com.conveyal.taui.models;
 
 import com.conveyal.r5.analyst.cluster.GridResultAssembler;
 import com.conveyal.r5.analyst.cluster.RegionalTask;
-import com.conveyal.taui.LocalBroker;
 import com.fasterxml.jackson.annotation.JsonView;
 
 import java.io.Serializable;
@@ -28,8 +27,10 @@ public class RegionalAnalysis extends Model implements Cloneable {
     public boolean isOwen = false;
 
     public static final class RegionalAnalysisStatus implements Serializable {
-        public int total;
-        public int complete;
+        public int total = -1;
+        public int complete = -1;
+
+        RegionalAnalysisStatus () {}
 
         public RegionalAnalysisStatus (GridResultAssembler assembler) {
             total = assembler.nTotal;
@@ -40,8 +41,9 @@ public class RegionalAnalysis extends Model implements Cloneable {
     // TODO do statuses differently
     @JsonView(JsonViews.Api.class)
     public RegionalAnalysisStatus getStatus () {
-        GridResultAssembler assembler = LocalBroker.getJob(this._id);
-        return assembler != null ? new RegionalAnalysisStatus(assembler) : null;
+        return new RegionalAnalysisStatus();
+        // GridResultAssembler assembler = LocalBroker.getJob(this._id);
+        // return assembler != null ? new RegionalAnalysisStatus(assembler) : null;
     }
 
     /**

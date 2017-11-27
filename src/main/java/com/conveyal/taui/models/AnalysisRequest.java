@@ -6,9 +6,11 @@ import com.conveyal.r5.analyst.scenario.Modification;
 import com.conveyal.r5.analyst.scenario.Scenario;
 import com.conveyal.r5.api.util.LegMode;
 import com.conveyal.r5.api.util.TransitModes;
+import com.conveyal.r5.common.JsonUtilities;
 import com.conveyal.taui.persistence.Persistence;
 import com.mongodb.QueryBuilder;
 
+import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
@@ -18,20 +20,35 @@ import java.util.zip.CRC32;
 public class AnalysisRequest {
     private static int ZOOM = 9;
 
-    public String regionId;
     public String projectId;
     public int variantIndex;
-    public String bundleId;
     public String workerVersion;
 
+    // All analyses parameters
     public String accessModes;
+    public float bikeSpeed;
+    public float carSpeed;
+    public LocalDate date;
     public String directModes;
     public String egressModes;
     public float fromLat;
     public float fromLon;
     public int fromTime;
+    public int monteCarloDraws = 200;
     public int toTime;
     public String transitModes;
+    public float walkSpeed;
+
+    // Parameters that aren't currently configurable in the UI
+    public int bikeTrafficStress = 4;
+    public int maxWalkTime = 20;
+    public int maxBikeTime = 20;
+    public int maxCarTime = 45;
+    public int maxRides = 4;
+    public int minBikeTime = 10;
+    public int minCarTime = 10;
+    public int streetTime = 90;
+    public int suboptimalMinutes = 5;
 
     // Regional only
     public Bounds bounds;
@@ -56,31 +73,26 @@ public class AnalysisRequest {
      * types, creates a checksum from those modifications, and adds them to the AnalysisTask along with the rest of the
      * request.
      */
-    public AnalysisTask populateTask (AnalysisTask task, String accessGroup) {
-        List<Modification> modifications = modificationsForProject(accessGroup, projectId, variantIndex);
+    public AnalysisTask populateTask (AnalysisTask task, Project project) {
+        List<Modification> modifications = modificationsForProject(project.accessGroup, projectId, variantIndex);
 
         // No idea how long this operation takes or if it is actually necessary
         CRC32 crc = new CRC32();
         crc.update(modifications.stream().map(Modification::toString).collect(Collectors.joining("-")).getBytes());
+        crc.update(JsonUtilities.objectToJsonBytes(this));
 
         task.scenario = new Scenario();
         // TODO figure out why we use both
-        task.scenario.id = task.scenarioId = String.format("%s-%s-%s", projectId, variantIndex, crc.getValue());
+        task.jobId = String.format("%s-%s-%s", projectId, variantIndex, crc.getValue());
+        task.scenario.id = task.scenarioId = task.jobId;
         task.scenario.modifications = modifications;
 
-        task.graphId = bundleId;
-
-        if (travelTimePercentile == null) {
-            task.percentiles = new double[]{5, 25, 50, 75, 95};
-        } else {
-            task.percentiles = new double[]{travelTimePercentile};
-        }
-
+        task.graphId = project.bundleId;
         task.workerVersion = workerVersion;
 
         Bounds b = bounds;
         if (b == null) {
-            Region region = Persistence.regions.findByIdIfPermitted(regionId, accessGroup);
+            Region region = Persistence.regions.findByIdIfPermitted(project.regionId, project.accessGroup);
             b = region.bounds;
         }
 
@@ -95,10 +107,33 @@ public class AnalysisRequest {
         task.width = east - west;
         task.zoom = ZOOM;
 
+        task.date = date;
         task.fromLat = fromLat;
         task.fromLon = fromLon;
         task.fromTime = fromTime;
         task.toTime = toTime;
+
+        task.bikeSpeed = bikeSpeed;
+        task.carSpeed = carSpeed;
+        task.walkSpeed = walkSpeed;
+
+        task.bikeTrafficStress = bikeTrafficStress;
+        task.maxWalkTime = maxWalkTime;
+        task.maxBikeTime = maxBikeTime;
+        task.maxCarTime = maxCarTime;
+        task.maxRides = maxRides;
+        task.minBikeTime = minBikeTime;
+        task.minCarTime = minCarTime;
+        task.streetTime = streetTime;
+        task.suboptimalMinutes = suboptimalMinutes;
+
+        task.monteCarloDraws = monteCarloDraws;
+
+        if (travelTimePercentile == null) {
+            task.percentiles = new double[]{5, 25, 50, 75, 95};
+        } else {
+            task.percentiles = new double[]{travelTimePercentile};
+        }
 
         if (maxTripDurationMinutes != null) {
             task.maxTripDurationMinutes = maxTripDurationMinutes;

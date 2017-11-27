@@ -16,6 +16,7 @@ public class RemoveTrips extends Modification {
 
     public com.conveyal.r5.analyst.scenario.RemoveTrips toR5 () {
         com.conveyal.r5.analyst.scenario.RemoveTrips rt = new com.conveyal.r5.analyst.scenario.RemoveTrips();
+        rt.comment = name;
 
         if (trips == null) {
             rt.routes = feedScopeIds(feed, routes);

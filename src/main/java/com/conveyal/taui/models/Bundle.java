@@ -45,7 +45,7 @@ public class Bundle extends Model implements Cloneable {
         manifest.gtfsIds = this.feeds.stream().map(f -> f.bundleScopedFeedId).collect(Collectors.toList());
 
         String manifestFileName = GTFSCache.cleanId(this._id) + ".json";
-        OutputStream outputStream = StorageService.Bundles.getOutputStream(manifestFileName, null);
+        OutputStream outputStream = StorageService.Bundles.getOutputStream(manifestFileName);
         JsonUtil.objectMapper.writeValue(outputStream, manifest);
     }
 

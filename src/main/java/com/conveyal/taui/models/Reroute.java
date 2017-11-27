@@ -30,6 +30,12 @@ public class Reroute extends Modification {
 
     public com.conveyal.r5.analyst.scenario.Reroute toR5 () {
         com.conveyal.r5.analyst.scenario.Reroute rr = new com.conveyal.r5.analyst.scenario.Reroute();
+        rr.comment = name;
+
+        List<ModificationStop> stops = ModificationStop.getStopsFromSegments(segments);
+        rr.dwellTimes = ModificationStop.getDwellTimes(stops, dwellTimes, dwellTime);
+        rr.hopTimes = ModificationStop.getHopTimes(stops, segmentSpeeds);
+        rr.stops = ModificationStop.toSpec(stops);
 
         if (this.trips == null) {
             rr.routes = feedScopeIds(feed, routes);
@@ -46,11 +52,6 @@ public class Reroute extends Modification {
             rr.toStop = feedScopeId(feed, toStop);
             rr.stops.remove(rr.stops.size() - 1);
         }
-
-        List<ModificationStop> stops = ModificationStop.getStopsFromSegments(segments);
-        rr.dwellTimes = ModificationStop.getDwellTimes(stops, dwellTimes, dwellTime);
-        rr.hopTimes = ModificationStop.getHopTimes(stops, segmentSpeeds);
-        rr.stops = ModificationStop.toSpec(stops);
 
         return rr;
     }

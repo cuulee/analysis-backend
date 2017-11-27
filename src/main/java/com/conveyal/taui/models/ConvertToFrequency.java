@@ -46,7 +46,7 @@ public class ConvertToFrequency extends Modification {
 
     public AdjustFrequency toR5 () {
         AdjustFrequency af = new AdjustFrequency();
-
+        af.comment = name;
         af.route = feedScopeId(feed, routes[0]);
         af.retainTripsOutsideFrequencyEntries = retainTripsOutsideFrequencyEntries;
         af.entries = entries.stream().map(e -> e.toR5(feed)).collect(Collectors.toList());
