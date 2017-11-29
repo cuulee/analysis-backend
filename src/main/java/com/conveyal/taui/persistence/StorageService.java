@@ -4,8 +4,10 @@ import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3Client;
 import com.amazonaws.services.s3.model.ObjectMetadata;
 import com.conveyal.taui.AnalysisServerConfig;
+import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import spark.Response;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -57,6 +59,26 @@ public class StorageService {
         public OutputStream getOutputStream (String key) throws IOException {
             return getOutputStream(key, null);
         }
+
+        public GZIPOutputStream getGZIPOutputStream (String key) throws IOException {
+            return new GZIPOutputStream(getOutputStream(key));
+        }
+
+        public void retrieveAndRespond (Response response, String key, boolean isGzipped) throws IOException {
+            if (isGzipped) {
+                // Tell the client it's GZIPed binary data
+                response.header("Content-Encoding", "gzip");
+                response.type("application/octet-stream");
+            }
+
+            InputStream inputStream = getInputStream(key);
+            OutputStream responseOutput = response.raw().getOutputStream();
+
+            IOUtils.copy(inputStream, responseOutput);
+
+            inputStream.close();
+            responseOutput.close();
+        }
     }
 
     public static class FileBucket extends Bucket {
@@ -79,7 +101,17 @@ public class StorageService {
         }
 
         public OutputStream getOutputStream (String key, ObjectMetadata metadata) throws IOException {
-            return new FileOutputStream(new File(CACHE_DIR, key));
+            File f = new File(CACHE_DIR, key);
+
+            // If the key contains "/" the directory may need to be created
+            f.getParentFile().mkdirs();
+
+            FileOutputStream fileOutputStream = new FileOutputStream(f);
+            if (metadata != null && "gzip".equals(metadata.getContentEncoding())) {
+                return new GZIPOutputStream(fileOutputStream);
+            } else {
+                return fileOutputStream;
+            }
         }
     }
 
@@ -112,7 +144,7 @@ public class StorageService {
 
             s3Upload.execute(() -> s3.putObject(bucketName, key, pipedInputStream, metadata));
 
-            if (metadata != null && metadata.getContentEncoding().equals("gzip")) {
+            if (metadata != null && "gzip".equals(metadata.getContentEncoding())) {
                 return new GZIPOutputStream(pipedOutputStream);
             } else {
                 return pipedOutputStream;

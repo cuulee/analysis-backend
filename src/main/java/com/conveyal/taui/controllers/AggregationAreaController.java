@@ -24,7 +24,6 @@ import spark.Response;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.List;
 import java.util.Map;
@@ -118,13 +117,14 @@ public class AggregationAreaController {
         return Persistence.aggregationAreas.create(aggregationArea);
     }
 
-    private static InputStream getAggregationArea (Request req, Response res) throws IOException {
+    private static Object getAggregationArea (Request req, Response res) throws IOException {
         AggregationArea aggregationArea = Persistence.aggregationAreas.findByIdFromRequestIfPermitted(req);
-        return StorageService.Grids.getInputStream(aggregationArea.getS3Key());
+        StorageService.Grids.retrieveAndRespond(res, aggregationArea.getS3Key(), true);
+        return null;
     }
 
     public static void register () {
-        get("/api/region/:regionId/aggregationArea/:_id", AggregationAreaController::getAggregationArea, JsonUtil.objectMapper::writeValueAsString);
+        get("/api/region/:regionId/aggregationArea/:_id", AggregationAreaController::getAggregationArea);
         post("/api/region/:regionId/aggregationArea", AggregationAreaController::createAggregationArea, JsonUtil.objectMapper::writeValueAsString);
     }
 }

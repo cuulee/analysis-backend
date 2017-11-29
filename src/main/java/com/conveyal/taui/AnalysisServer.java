@@ -52,6 +52,9 @@ public class AnalysisServer {
         // http://stackoverflow.com/questions/20789546
         ImageIO.scanForPlugins();
 
+        // Turn on the broker
+        LocalBroker.start();
+
         // check if a user is authenticated
         before((req, res) -> {
             if (!req.pathInfo().startsWith(API_PATH)) return; // don't need to be authenticated to view main page

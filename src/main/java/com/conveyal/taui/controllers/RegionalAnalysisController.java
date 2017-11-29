@@ -21,7 +21,6 @@ import spark.Request;
 import spark.Response;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Collection;
 
@@ -66,7 +65,7 @@ public class RegionalAnalysisController {
     }
 
     /** Get a particular percentile of a query as a grid file */
-    private static InputStream getPercentile (Request req, Response res) throws IOException {
+    private static Object getPercentile (Request req, Response res) throws IOException {
         String regionalAnalysisId = req.params("_id");
 
         // while we can do non-integer percentiles, don't allow that here to prevent cache misses
@@ -76,21 +75,21 @@ public class RegionalAnalysisController {
         String percentileGridKey = String.format("%s_given_percentile_travel_time.%s", regionalAnalysisId, format);
         String accessGridKey = String.format("%s.access", regionalAnalysisId);
 
+        ObjectMetadata om = new ObjectMetadata();
+        if ("grid".equals(format)) {
+            om.setContentType("application/octet-stream");
+            om.setContentEncoding("gzip");
+        } else if ("png".equals(format)) {
+            om.setContentType("image/png");
+        } else if ("tiff".equals(format)) {
+            om.setContentType("image/tiff");
+        }
+
         if (!StorageService.Results.exists(percentileGridKey)) {
             long computeStart = System.currentTimeMillis();
             // make the grid
             Grid grid = new SelectingGridReducer(0).compute(StorageService.Results.getInputStream(accessGridKey));
             LOG.info("Building grid took {}s", (System.currentTimeMillis() - computeStart) / 1000d);
-
-            ObjectMetadata om = new ObjectMetadata();
-            if ("grid".equals(format)) {
-                om.setContentType("application/octet-stream");
-                om.setContentEncoding("gzip");
-            } else if ("png".equals(format)) {
-                om.setContentType("image/png");
-            } else if ("tiff".equals(format)) {
-                om.setContentType("image/tiff");
-            }
 
             OutputStream outputStream = StorageService.Results.getOutputStream(percentileGridKey, om);
 
@@ -103,16 +102,28 @@ public class RegionalAnalysisController {
             }
         }
 
-        return StorageService.Results.getInputStream(percentileGridKey);
+        StorageService.Results.retrieveAndRespond(res, percentileGridKey, "gzip".equals(om.getContentEncoding()));
+
+        return null;
     }
 
     /** Get a probability of improvement from a baseline to a project */
-    private static InputStream getProbabilitySurface (Request req, Response res) throws IOException {
+    private static Object getProbabilitySurface (Request req, Response res) throws IOException {
         String base = req.params("baseId");
         String project = req.params("projectId");
         String format = req.params("format").toLowerCase();
         validateFormat(format);
         String probabilitySurfaceKey = String.format("%s_%s_probability.%s", base, project, format);
+
+        ObjectMetadata om = new ObjectMetadata();
+        if ("grid".equals(format)) {
+            om.setContentType("application/octet-stream");
+            om.setContentEncoding("gzip");
+        } else if ("png".equals(format)) {
+            om.setContentType("image/png");
+        } else if ("tiff".equals(format)) {
+            om.setContentType("image/tiff");
+        }
 
         if (!StorageService.Results.exists(probabilitySurfaceKey)) {
             LOG.info("Probability surface for {} -> {} not found, building it", base, project);
@@ -126,15 +137,6 @@ public class RegionalAnalysisController {
             BootstrapPercentileMethodHypothesisTestGridReducer computer = new BootstrapPercentileMethodHypothesisTestGridReducer();
             Grid grid = computer.computeImprovementProbability(StorageService.Results.getInputStream(baseKey), StorageService.Results.getInputStream(projectKey));
 
-            ObjectMetadata om = new ObjectMetadata();
-            if ("grid".equals(format)) {
-                om.setContentType("application/octet-stream");
-                om.setContentEncoding("gzip");
-            } else if ("png".equals(format)) {
-                om.setContentType("image/png");
-            } else if ("tiff".equals(format)) {
-                om.setContentType("image/tiff");
-            }
             OutputStream outputStream = StorageService.Results.getOutputStream(probabilitySurfaceKey, om);
 
             if ("grid".equals(format)) {
@@ -146,7 +148,9 @@ public class RegionalAnalysisController {
             }
         }
 
-        return StorageService.Results.getInputStream(probabilitySurfaceKey);
+        StorageService.Results.retrieveAndRespond(res, probabilitySurfaceKey, "gzip".equals(om.getContentEncoding()));
+
+        return null;
     }
 
     private static int[] getSamplingDistribution (Request req, Response res) {
@@ -164,10 +168,11 @@ public class RegionalAnalysisController {
     }
 
     private static RegionalAnalysis createRegionalAnalysis (Request req, Response res) throws IOException {
-        AnalysisRequest analysisRequest = JsonUtil.objectMapper.readValue(req.body(), AnalysisRequest.class);
-        String accessGroup = req.attribute("accessGroup");
-        Project project = Persistence.projects.findByIdIfPermitted(analysisRequest.projectId, accessGroup);
+        final String accessGroup = req.attribute("accessGroup");
+        final String email = req.attribute("email");
 
+        AnalysisRequest analysisRequest = JsonUtil.objectMapper.readValue(req.body(), AnalysisRequest.class);
+        Project project = Persistence.projects.findByIdIfPermitted(analysisRequest.projectId, accessGroup);
         RegionalTask task = (RegionalTask) analysisRequest.populateTask(new RegionalTask(), project);
 
         task.grid = String.format("%s/%s.grid", project.regionId, analysisRequest.opportunityDatasetKey);
@@ -178,7 +183,7 @@ public class RegionalAnalysisController {
         RegionalAnalysis regionalAnalysis = new RegionalAnalysis();
 
         regionalAnalysis.accessGroup = accessGroup;
-        regionalAnalysis.createdBy = req.attribute("email");
+        regionalAnalysis.createdBy = email;
         regionalAnalysis.regionId = project.regionId;
         regionalAnalysis.projectId = analysisRequest.projectId;
         regionalAnalysis.name = analysisRequest.name;

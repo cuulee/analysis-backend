@@ -3,7 +3,9 @@ package com.conveyal.taui;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.sqs.AmazonSQS;
 import com.amazonaws.services.sqs.AmazonSQSClient;
+import com.conveyal.r5.analyst.Grid;
 import com.conveyal.r5.analyst.broker.BrokerMain;
+import com.conveyal.r5.analyst.broker.Job;
 import com.conveyal.r5.analyst.cluster.AnalysisTask;
 import com.conveyal.r5.analyst.cluster.AnalystWorker;
 import com.conveyal.r5.analyst.cluster.GridResultAssembler;
@@ -14,8 +16,10 @@ import com.conveyal.r5.common.JsonUtilities;
 import com.conveyal.r5.transit.TransportNetworkCache;
 import com.conveyal.taui.persistence.GTFSPersistence;
 import com.conveyal.taui.persistence.OSMPersistence;
+import com.conveyal.taui.persistence.StorageService;
 import com.conveyal.taui.persistence.TiledAccessGrid;
 import com.conveyal.taui.util.HttpUtil;
+import com.conveyal.taui.util.JsonUtil;
 import com.google.common.io.ByteStreams;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
@@ -30,8 +34,7 @@ import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.List;
+import java.io.OutputStream;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 
@@ -53,17 +56,21 @@ public class LocalBroker {
     private static final String RESULTS_BUCKET = AnalysisServerConfig.resultsBucket;
     private static final String RESULTS_QUEUE = AnalysisServerConfig.resultsQueue;
 
-    private static final AnalystWorker analysisWorker;
-    private static final BrokerMain broker;
+    private static AnalystWorker analysisWorker;
+    private static BrokerMain broker;
+    private static int nextTaskId = 0;
 
-    private static final Thread analysisWorkerThread;
-    private static final Thread brokerThread;
+    private static Thread analysisWorkerThread;
+    private static Thread brokerThread;
 
     private static GridResultQueueConsumer consumer;
     private static Thread consumerThread;
     public static String resultsQueueUrl;
 
-    static {
+    /**
+     * Start the BrokerMain thread which contains an HTTP server and needs a moment to connect.
+     */
+    public static void start () {
         // start the broker
         Properties brokerConfig = new Properties();
 
@@ -99,14 +106,12 @@ public class LocalBroker {
         brokerThread.start();
 
         // Initialize the grid consumer TODO enable a non-SQS mode
-        if (!OFFLINE) {
-            AmazonSQS sqs = new AmazonSQSClient();
-            sqs.setRegion(com.amazonaws.regions.Region.getRegion(Regions.fromName(AWS_REGION)));
-            resultsQueueUrl = sqs.getQueueUrl(RESULTS_QUEUE).getQueueUrl();
-            consumer = new GridResultQueueConsumer(resultsQueueUrl, RESULTS_BUCKET);
-            consumerThread = new Thread(consumer, QUEUE_CONSUMER_NAME);
-            consumerThread.start();
-        }
+        AmazonSQS sqs = new AmazonSQSClient();
+        sqs.setRegion(com.amazonaws.regions.Region.getRegion(Regions.fromName(AWS_REGION)));
+        resultsQueueUrl = sqs.getQueueUrl(RESULTS_QUEUE).getQueueUrl();
+        consumer = new GridResultQueueConsumer(resultsQueueUrl, RESULTS_BUCKET);
+        consumerThread = new Thread(consumer, QUEUE_CONSUMER_NAME);
+        consumerThread.start();
     }
 
     public static void deleteJob (String jobId) {
@@ -119,20 +124,41 @@ public class LocalBroker {
      * broker a single task. TODO update when the broker can take a single regional task.
      * @param initialTask The initial task that is stored in a Regional Analysis
      */
-    public static void enqueueRegionalTask(RegionalTask initialTask) {
-        // Start the regional analysis
-        List<AnalysisTask> tasks = new ArrayList<>();
+    public static void enqueueRegionalTask(RegionalTask initialTask) throws IOException {
+        // Register a consumer
+        consumer.registerJob(initialTask, new TilingGridResultAssembler(initialTask, RESULTS_BUCKET));
+
+        // Store the scenario for the workers
+        String fileName = String.format("%s_%s.json", initialTask.graphId, initialTask.scenarioId);
+        OutputStream out = StorageService.Bundles.getOutputStream(fileName);
+        JsonUtil.objectMapper.writeValue(out, initialTask.scenario);
+
+        // If we're offline, send the entire scenario. If not, delete and just send the scenarioId
+        if (!OFFLINE) {
+            initialTask.scenario = null;
+        }
+
+        // Creates a job if one doesn't exist
+        Job job = broker.broker.findJob(initialTask);
+
+        // Create a worker, if one doesn't exist
+        broker.broker.createWorkersInCategory(job.getWorkerCategory());
 
         for (int x = 0; x < initialTask.width; x++) {
             for (int y = 0; y < initialTask.height; y++) {
-                AnalysisTask nextTask = initialTask.clone();
+                RegionalTask nextTask = initialTask.clone();
+                nextTask.taskId = nextTaskId++;
+                nextTask.x = x;
+                nextTask.y = y;
+                nextTask.fromLat = Grid.pixelToCenterLat(nextTask.north + y, nextTask.zoom);
+                nextTask.fromLon = Grid.pixelToCenterLon(nextTask.west + x, nextTask.zoom);
 
-                tasks.add(nextTask);
+                job.addTask(nextTask);
             }
         }
 
-        broker.broker.enqueueTasks(tasks);
-        consumer.registerJob(initialTask, new TilingGridResultAssembler(initialTask, RESULTS_BUCKET));
+        // Wake it up TODO not sure if this is necessary anymore
+        broker.broker.notify();
     }
 
     /**

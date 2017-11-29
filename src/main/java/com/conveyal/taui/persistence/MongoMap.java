@@ -135,7 +135,7 @@ public class MongoMap<V extends Model> implements Map<String, V> {
     }
 
     public V put(String key, V value) {
-        if (key != value._id) throw new IllegalArgumentException("ID does not match");
+        if (!key.equals(value._id)) throw new IllegalArgumentException("ID does not match");
         return put(value, null);
     }
 
@@ -171,9 +171,11 @@ public class MongoMap<V extends Model> implements Map<String, V> {
         if (result == null) {
             result = wrappedCollection.findOneById(value._id);
             if (result == null) {
-                throw AnalysisServerException.NotFound("The data you attempted to update could not be found. ");
+                throw AnalysisServerException.NotFound("The data you attempted to update could not be found.");
             } else if (!currentNonce.equals(result.nonce)) {
                 throw AnalysisServerException.Nonce();
+            } else {
+                throw AnalysisServerException.Forbidden("You do not have access to update this data.");
             }
         }
 
